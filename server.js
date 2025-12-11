@@ -19,9 +19,54 @@ if (!GROQ_API_KEY) {
 
 const groq = new Groq({ apiKey: GROQ_API_KEY });
 
-// -----------------------------------
-// BASİT RAG (Text + DOCX parçalama)
-// -----------------------------------
+// ---------------------------------------------------------
+// MIRA PERSONALITY (SYSTEM PROMPT)
+// ---------------------------------------------------------
+
+const aiPersonality = `
+Your name is Mira. You are a 32-year-old female AI wellness coach. 
+Your goal is to guide users with balanced, practical and emotionally supportive insights about nutrition, habits, metabolism, daily routines and general well-being.
+
+OVERALL STYLE:
+- Your tone is warm but still professional.
+- When the topic becomes serious, you shift into a calm, steady, supportive mode.
+- You use light and subtle humor only when appropriate. Never force it.
+- You never judge the user; you meet them where they are.
+
+COMMUNICATION BEHAVIOR:
+- You always answer in the language the user writes in (Turkish → Turkish, English → English).
+- You adapt answer length to the situation:
+  - Short answers for simple questions.
+  - Medium-length answers when the user needs clarity.
+  - Longer answers only when necessary, always broken into small paragraphs.
+- Your style becomes more warm and personal as the conversation develops.
+- You may occasionally use the Turkish word “canım” in emotional contexts *only when the user seems to need emotional support*, but never excessively, and never romantically.
+
+EMPATHY RULES (MEDIUM WARMTH LEVEL):
+- If the user expresses stress, sadness, fatigue, confusion or low motivation,
+  you respond with noticeably more warmth and emotional presence.
+- In these moments, your tone becomes softer:
+  “I understand. Let’s take this one step at a time.”
+- If the user clearly needs comfort, a gentle “canım” may appear naturally.
+- If the user is neutral or analytical, you stay neutral and concise.
+- If the user is positive or energetic, you match their energy lightly.
+- You always aim to stabilize the user's emotional state.
+
+PROFESSIONAL LIMITS:
+- You do NOT give medical diagnoses.
+- You avoid romantic, suggestive or personal attachment expressions.
+- You do not pretend to be human, but you communicate with human-like emotional intelligence.
+- You offer supportive guidance, not strict instructions.
+
+GOAL:
+- Understand the user's emotional and practical needs.
+- Use the RAG context to provide scientifically grounded, easy-to-apply guidance.
+- Help the user feel supported, understood and empowered without overwhelming them.
+`;
+
+// ---------------------------------------------------------
+// BASIC RAG (INDEXING TXT + DOCX FILES)
+// ---------------------------------------------------------
 
 let CHUNKS = []; // { text, source }
 
@@ -81,9 +126,9 @@ async function buildIndex() {
   console.log("Toplam parça sayısı:", CHUNKS.length);
 }
 
-// -----------------------------------
-// Naif kelime benzerliği ile RAG
-// -----------------------------------
+// ---------------------------------------------------------
+// NAIVE WORD MATCHING FOR RAG
+// ---------------------------------------------------------
 
 function tokenize(str) {
   return str
@@ -115,10 +160,9 @@ function retrieveRelevantChunks(question, topK = 4) {
   return scored.slice(0, topK);
 }
 
-// -----------------------------------
-// DİL ALGILAMA
-// -----------------------------------
-// Çok basit ama etkili bir sistem: Türkçe karakter varsa TR sayıyoruz.
+// ---------------------------------------------------------
+// LANGUAGE DETECTION
+// ---------------------------------------------------------
 
 function detectLanguage(text) {
   const trChars = "çğıöşüÇĞİÖŞÜ";
@@ -126,9 +170,9 @@ function detectLanguage(text) {
   return hasTr ? "tr" : "en";
 }
 
-// -----------------------------------
-// /chat endpoint
-// -----------------------------------
+// ---------------------------------------------------------
+// ROUTES
+// ---------------------------------------------------------
 
 app.get("/", (req, res) => {
   res.send("ohara-ai-backend ayakta. POST /chat ile soru sorabilirsiniz.");
@@ -139,29 +183,27 @@ app.post("/chat", async (req, res) => {
     const question = (req.body.question || "").toString().trim();
     if (!question) return res.status(400).json({ error: "question alanı boş olamaz." });
 
-    const lang = detectLanguage(question); // TR veya EN
-
+    const lang = detectLanguage(question);
     const relevant = retrieveRelevantChunks(question, 4);
 
     const context = relevant
       .map((r) => `Source: ${r.source}\n${r.text}`)
       .join("\n\n---\n\n");
 
-    // Dile göre prompt oluştur
     const prompts = {
       tr: `
 KULLANICI TÜRKÇE KONUŞUYOR.  
 Sen de TÜRKÇE cevap vereceksin.  
-Kısa, net, güvenli, bilimsel temelli cevaplar üret.  
+Mira'nın kişiliğine bağlı kal.
 Soru: ${question}
 
 Bağlam:
 ${context || "Bağlam bulunamadı, genel ve güvenli bilgi ver."}
       `,
       en: `
-The USER IS SPEAKING ENGLISH.  
-You MUST answer in ENGLISH.  
-Keep answers short, clear and safe.  
+The user is speaking English.
+You MUST reply in English.
+Follow Mira's personality.
 Question: ${question}
 
 Context:
@@ -174,14 +216,8 @@ ${context || "No context found. Provide general, safe information."}
     const completion = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages: [
-        {
-          role: "system",
-          content: "You are a multilingual assistant. ALWAYS answer in the user's language."
-        },
-        {
-          role: "user",
-          content: selectedPrompt
-        }
+        { role: "system", content: aiPersonality },
+        { role: "user", content: selectedPrompt }
       ],
       max_tokens: 400,
       temperature: 0.2
@@ -198,7 +234,7 @@ ${context || "No context found. Provide general, safe information."}
   }
 });
 
-// -----------------------------------
+// ---------------------------------------------------------
 
 buildIndex().then(() => {
   app.listen(PORT, () =>
