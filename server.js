@@ -220,7 +220,7 @@ ${context || "No context found. Provide general, safe information."}
     const selectedPrompt = prompts[lang];
 
     const completion = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
+      model: MODEL_ID, // Tırnakları kaldırıp direkt değişkeni yazdık
       messages: [
         { role: "system", content: aiPersonality },
         { role: "user", content: selectedPrompt }
