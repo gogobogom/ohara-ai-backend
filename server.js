@@ -12,6 +12,9 @@ app.use(cors());
 const PORT = process.env.PORT || 3000;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
+// Railway ortam değişkenlerinden MODEL_ID'yi çekiyoruz, yoksa fallback olarak belirlediğin modeli kullanır
+const MODEL_ID = process.env.MODEL_ID || "meta-llama/llama-4-scout-17b-16e-instruct";
+
 if (!GROQ_API_KEY) {
   console.error("HATA: GROQ_API_KEY ortam değişkeni tanımlı değil.");
   process.exit(1);
