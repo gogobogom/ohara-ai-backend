@@ -161,20 +161,97 @@ const TR_STOPWORDS = new Set([
 
 // Intent keywords that score higher during retrieval
 const INTENT_KEYWORDS = new Set([
-  "tarif", "motivasyon", "protein", "kalori", "karbonhidrat", "yağ",
+  "tarif", "motivasyon", "motivasyonum", "protein", "proteinli", "kalori", "karbonhidrat", "yağ",
   "diyet", "beslenme", "kilo", "zayıflama", "toparla", "enerji",
   "egzersiz", "spor", "metabolizma", "açlık", "tokluk", "öğün",
-  "kahvaltı", "öğle", "akşam", "atıştırma", "porsiyon", "makro"
+  "kahvaltı", "öğle", "akşam", "atıştırma", "porsiyon", "makro",
+  // Quick meal
+  "hızlı", "pratik", "çabuk", "acele", "dakika", "dakikada",
+  // Dinner/evening
+  "akşam yemeği", "akşam öğünü", "gece", "yemek",
+  // Weight loss
+  "kilo vermek", "kilo kaybı", "ağırlık",
+  // Motivation / recovery
+  "destek", "psikolojik", "moral", "telafi",
+  // Low-carb
+  "ketojenik", "şekersiz",
+  // Protein / muscle
+  "kas", "kas kütlesi", "amino asit"
 ]);
 
 // Food and diet terms that score higher
 const FOOD_DIET_TERMS = new Set([
-  "tavuk", "et", "balık", "yumurta", "sebze", "meyve", "salata",
+  "tavuk", "et", "balık", "yumurta", "sebze", "sebzeli", "sebzeler", "meyve", "salata",
   "çorba", "pilav", "makarna", "ekmek", "peynir", "yoğurt", "süt",
   "keto", "vegan", "vejetaryen", "glutensiz", "laktoz", "şeker",
-  "tatlı", "meyve", "kuruyemiş", "badem", "ceviz", "fındık",
-  "smoothie", "protein", "vitamin", "mineral", "lif", "omega"
+  "tatlı", "dessert", "pasta", "kek", "çikolata",
+  "meyve", "kuruyemiş", "badem", "ceviz", "fındık",
+  "smoothie", "protein", "vitamin", "mineral", "lif", "omega",
+  // Low-carb variants
+  "low-carb", "düşük karbonhidrat", "az karbonhidrat",
+  // Vegetables
+  "yeşil",
+  // Recovery
+  "yemek atlamak"
 ]);
+
+/**
+ * Expand a user query with synonyms so that retrieval can match chunks
+ * that use different but equivalent terminology.
+ * The original question is preserved; synonyms are appended.
+ */
+function expandQueryWithSynonyms(question) {
+  const lower = question.toLowerCase();
+  const expansions = [];
+
+  // Quick meal synonyms
+  if (/hızlı|pratik|çabuk|acele|vaktim yok|\d+\s*dakika/.test(lower)) {
+    expansions.push("hızlı pratik çabuk acele 10 dakika vaktim yok kısa dakika dakikada");
+  }
+
+  // Dinner / evening meal synonyms
+  if (/akşam|gece|yemek|öğün/.test(lower)) {
+    expansions.push("akşam akşam yemeği akşam öğünü gece yemek öğün");
+  }
+
+  // Vegetables synonyms
+  if (/sebze|yeşil|salata/.test(lower)) {
+    expansions.push("sebze sebzeli yeşil salata sebzeler");
+  }
+
+  // Low-carb synonyms
+  if (/low-carb|keto|ketojenik|düşük karbonhidrat|az karbonhidrat|şekersiz/.test(lower)) {
+    expansions.push("low-carb keto ketojenik düşük karbonhidrat az karbonhidrat şekersiz");
+  }
+
+  // Dessert synonyms
+  if (/tatlı|dessert|şeker|pasta|kek|çikolata/.test(lower)) {
+    expansions.push("tatlı dessert şeker pasta kek çikolata");
+  }
+
+  // Protein synonyms
+  if (/protein|kas|amino/.test(lower)) {
+    expansions.push("protein proteinli kas kas kütlesi amino asit");
+  }
+
+  // Weight loss synonyms
+  if (/kilo|zayıflama|diyet|ağırlık/.test(lower)) {
+    expansions.push("kilo kilo vermek zayıflama diyet kilo kaybı ağırlık");
+  }
+
+  // Motivation synonyms
+  if (/motivasyon|toparla|destek|psikolojik|moral/.test(lower)) {
+    expansions.push("motivasyon motivasyonum toparla destek psikolojik moral");
+  }
+
+  // Recovery / overate synonyms
+  if (/telafi|aç kalayım|açlık|yemek atlamak|kaçırdım|kaçırmak/.test(lower)) {
+    expansions.push("telafi telafi etmek aç kalayım açlık yemek atlamak kaçırmak");
+  }
+
+  if (expansions.length === 0) return question;
+  return question + " " + expansions.join(" ");
+}
 
 /**
  * Tokenize a string while preserving Turkish characters.
@@ -238,24 +315,56 @@ function scoreChunk(question, questionTokens, chunkText) {
 
 /**
  * Retrieve the most relevant chunks for a question.
- * Returns empty array (not fallback chunks) when no matches found,
- * so the model answers from general knowledge with guardrails.
+ * Uses synonym expansion and profile-based query augmentation.
+ * Falls back to top-N chunks by score when nothing passes the threshold,
+ * so the model always has some grounding context for wellness queries.
  */
-function retrieveRelevantChunks(question, topK = 4) {
-  const qTokens = tokenize(question);
+function retrieveRelevantChunks(question, topK = 4, profile = null) {
+  // Step 1: expand the query with synonyms
+  let expandedQuestion = expandQueryWithSynonyms(question);
+
+  // Step 2: inject profile signals into the query so retrieval respects them
+  if (profile) {
+    const profileTerms = [];
+    if (profile.dietStyle) profileTerms.push(profile.dietStyle);
+    if (profile.goal)      profileTerms.push(profile.goal);
+    if (profile.dislikedFoods && profile.dislikedFoods.length > 0) {
+      // Add disliked foods so chunks mentioning them can be deprioritised
+      // (they won't boost score, but the expanded tokens help find alternatives)
+      profileTerms.push(...profile.dislikedFoods);
+    }
+    if (profileTerms.length > 0) {
+      expandedQuestion = expandedQuestion + " " + profileTerms.join(" ");
+    }
+  }
+
+  const qTokens = tokenize(expandedQuestion);
 
   if (qTokens.length === 0) return [];
 
   const scored = CHUNKS.map((ch) => ({
     ...ch,
-    score: scoreChunk(question, qTokens, ch.text)
+    score: scoreChunk(expandedQuestion, qTokens, ch.text)
   }));
 
   scored.sort((a, b) => b.score - a.score);
 
-  // Only return chunks with a positive score — no random fallback
-  const relevant = scored.filter((ch) => ch.score > 0).slice(0, topK);
-  return relevant;
+  // Primary: chunks with a positive score
+  const positiveChunks = scored.filter((ch) => ch.score > 0);
+
+  if (positiveChunks.length >= 2) {
+    // Enough good matches — return top K
+    return positiveChunks.slice(0, topK);
+  }
+
+  if (positiveChunks.length === 1) {
+    // Only one positive chunk — lower threshold: also include next best even if score is 0
+    return scored.slice(0, Math.min(topK, scored.length));
+  }
+
+  // No chunks scored > 0 — return top N by raw score as a last-resort fallback
+  // so the model has some grounding rather than answering from zero context
+  return scored.slice(0, Math.min(topK, scored.length));
 }
 
 // ---------------------------------------------------------
@@ -385,7 +494,7 @@ app.post("/chat", async (req, res) => {
 
     const lang = detectLanguage(question);
     const intents = detectIntents(question);
-    const relevant = retrieveRelevantChunks(question, 4);
+    const relevant = retrieveRelevantChunks(question, 4, profile);
 
     const context = relevant.length > 0
       ? relevant.map((r) => `Source: ${r.source}\n${r.text}`).join("\n\n---\n\n")
@@ -411,6 +520,19 @@ app.post("/chat", async (req, res) => {
       }
     }
 
+    // Build a compact profile constraint reminder to repeat near the context
+    let profileConstraintReminder = "";
+    if (profile) {
+      const remParts = [];
+      if (profile.dietStyle) remParts.push(`Diyet stili: ${profile.dietStyle}`);
+      if (profile.dislikedFoods && profile.dislikedFoods.length > 0)
+        remParts.push(`Kesinlikle önerme: ${profile.dislikedFoods.join(", ")}`);
+      if (profile.goal) remParts.push(`Hedef: ${profile.goal}`);
+      if (remParts.length > 0) {
+        profileConstraintReminder = `\n[PROFİL KISITLAMALARI — BAĞLAMI OKURKEN DE UYGULA: ${remParts.join(" | ")}]\n`;
+      }
+    }
+
     const prompts = {
       tr: `
 KULLANICI TÜRKÇE KONUŞUYOR.
@@ -420,7 +542,7 @@ ${intentInstructions ? `\n${intentInstructions}\n` : ""}${profileContext}
 Soru: ${question}
 
 ${context
-  ? `Bağlam:\n${context}`
+  ? `${profileConstraintReminder}Bağlam:\n${context}${profileConstraintReminder}`
   : "Bağlam bulunamadı. Genel ve güvenli bilgi ver; yukarıdaki kısıtlamalara kesinlikle uy."}
       `,
       en: `
@@ -431,7 +553,7 @@ ${intentInstructions ? `\n${intentInstructions}\n` : ""}${profileContext}
 Question: ${question}
 
 ${context
-  ? `Context:\n${context}`
+  ? `${profileConstraintReminder}Context:\n${context}${profileConstraintReminder}`
   : "No context found. Provide general, safe information and strictly follow the constraints above."}
       `
     };
