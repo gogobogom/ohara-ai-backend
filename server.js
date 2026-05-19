@@ -73,6 +73,13 @@ DIETARY GUARDRAILS (HARD RULES — NEVER VIOLATE):
 - Do NOT label a high-protein food as "düşük proteinli." Protein content must be accurate.
 - When the user asks for mindset, motivation, recovery, or an explanation — use coaching mode, not recipe mode.
 
+LOW-CARB FRUIT GUIDANCE: For low-carb/keto requests:
+- Avoid generic "meyve" recommendations without context.
+- Prefer berries (çilek, mirtil, ahududu) in limited portions (bir avuç).
+- Never suggest high-sugar fruits (orange, pomelo, banana, mango, grape, dried fruit) without explicit low-carb warning.
+- If fruit is mentioned, always specify portion size and carb content.
+- Prefer non-fruit alternatives: Greek yogurt, nuts, chia seeds, dark chocolate (85%+).
+
 LOW-CARB FRUIT HANDLING: If the user is on low-carb/keto and you suggest fruit, ALWAYS include a clear warning or context:
 - High-sugar fruits (orange, pomelo, banana, mango, grape, dried fruit): Only suggest if user explicitly asks for fruit, and always note "yüksek şeker içeriği" or "sınırlı miktarda".
 - Low-carb fruits (berries, avocado, coconut): Safe to suggest freely.
@@ -498,6 +505,33 @@ function buildIntentInstructions(intents, profile) {
 }
 
 // ---------------------------------------------------------
+// ANSWER SANITIZATION
+// ---------------------------------------------------------
+
+function sanitizeAnswer(answer) {
+  // Remove overly intimate Turkish address terms
+  // These are too personal for a professional wellness coach
+  const intimateTerms = [
+    /\bcanım\b/gi,
+    /\btatlım\b/gi,
+    /\bgüzelim\b/gi,
+    /\başkım\b/gi,
+    /\bdostum\b/gi,
+    /\bsevgilim\b/gi
+  ];
+
+  let sanitized = answer;
+  for (const term of intimateTerms) {
+    sanitized = sanitized.replace(term, "");
+  }
+
+  // Clean up any double spaces created by removals
+  sanitized = sanitized.replace(/\s+/g, " ").trim();
+
+  return sanitized;
+}
+
+// ---------------------------------------------------------
 // LANGUAGE DETECTION
 // ---------------------------------------------------------
 
@@ -604,8 +638,11 @@ ${context
     // Filter out zero-score chunks from metadata
     const usedChunks = relevant.filter((r) => r.score > 0);
 
+    // Sanitize the answer to remove overly intimate terms
+    const sanitizedAnswer = sanitizeAnswer(completion.choices?.[0]?.message?.content || "");
+
     res.json({
-      answer: completion.choices?.[0]?.message?.content || "",
+      answer: sanitizedAnswer,
       language: lang,
       used_chunks: usedChunks.map((r) => ({ source: r.source, score: r.score }))
     });
