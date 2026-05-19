@@ -535,6 +535,37 @@ function sanitizeAnswer(answer) {
 }
 
 // ---------------------------------------------------------
+// LANGUAGE CONSISTENCY (TURKISH TERM ENFORCEMENT)
+// ---------------------------------------------------------
+
+function enforceLanguageConsistency(answer, language) {
+  if (language !== "tr") return answer;
+
+  // Replace English nutrition/wellness terms with Turkish equivalents
+  // Only replace if not part of a user quote or explicit reference
+  const replacements = [
+    { en: /\blow-carb\b/gi, tr: "düşük karbonhidratlı" },
+    { en: /\bketo\b/gi, tr: "ketojenik" },
+    { en: /\bberries?\b/gi, tr: "orman meyveleri" },
+    { en: /\bGreek yogurt\b/gi, tr: "süzme yoğurt" },
+    { en: /\bprotein-first\b/gi, tr: "protein öncelikli" },
+    { en: /\bsnack\b/gi, tr: "ara öğün" },
+    { en: /\bmeal\b/gi, tr: "öğün" },
+    { en: /\bdiet style\b/gi, tr: "beslenme tarzı" },
+    { en: /\bcalorie deficit\b/gi, tr: "kalori açığı" },
+    { en: /\bcoaching\b/gi, tr: "koçluk" },
+    { en: /\bcoach(?:ing)?\b/gi, tr: "destek" }
+  ];
+
+  let result = answer;
+  for (const { en, tr } of replacements) {
+    result = result.replace(en, tr);
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------
 // LANGUAGE DETECTION
 // ---------------------------------------------------------
 
@@ -638,15 +669,17 @@ ${context
       temperature: 0.2
     });
 
-    // Sanitize the answer before returning
-    const rawAnswer = completion.choices?.[0]?.message?.content || "";
-    const sanitizedAnswer = sanitizeAnswer(rawAnswer);
+    // Sanitize the answer to remove overly intimate terms
+    const sanitizedAnswer = sanitizeAnswer(completion.choices?.[0]?.message?.content || "");
+
+    // Enforce language consistency (Turkish terms for Turkish responses)
+    const consistentAnswer = enforceLanguageConsistency(sanitizedAnswer, lang);
 
     // Filter out zero-score chunks from metadata
     const usedChunks = relevant.filter((r) => r.score > 0);
 
     res.json({
-      answer: sanitizedAnswer,
+      answer: consistentAnswer,
       language: lang,
       used_chunks: usedChunks.map((r) => ({ source: r.source, score: r.score }))
     });
