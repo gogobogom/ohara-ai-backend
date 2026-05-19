@@ -78,6 +78,13 @@ LOW-CARB FRUIT HANDLING: If the user is on low-carb/keto and you suggest fruit, 
 - Low-carb fruits (berries, avocado, coconut): Safe to suggest freely.
 - If unsure about a fruit's carb content, err on the side of caution and mention the carb content or suggest alternatives.
 
+LOW-CARB FRUIT GUIDANCE: For low-carb/keto requests:
+- Prefer berries (çilek, mirtil, ahududu, kara mirtil) in limited portions (bir avuç).
+- Avoid high-sugar fruits (muz, portakal, mango, üzüm, kuru meyve) unless user explicitly asks for fruit.
+- If fruit is mentioned, always specify portion size and carb content.
+- Prefer non-fruit alternatives: Greek yogurt, nuts, chia seeds, dark chocolate (85%+).
+- Never generically recommend "meyve" without low-carb context.
+
 QUICK-MEAL (10 MINUTES OR LESS): Prioritize:
 - Protein-first options (egg, canned fish, deli meat, cheese, yogurt, nuts).
 - Simple ingredients (no complex prep, no marination, no slow cooking).
@@ -498,6 +505,36 @@ function buildIntentInstructions(intents, profile) {
 }
 
 // ---------------------------------------------------------
+// ANSWER SANITIZATION
+// ---------------------------------------------------------
+
+function sanitizeAnswer(answer) {
+  // Remove overly intimate Turkish address terms
+  // These are too personal for a professional wellness coach
+  const intimateTerms = [
+    /\bcanım\b/gi,
+    /\bcanim\b/gi,
+    /\btatlım\b/gi,
+    /\btatlim\b/gi,
+    /\bgüzelim\b/gi,
+    /\bguzelim\b/gi,
+    /\başkım\b/gi,
+    /\baskım\b/gi,
+    /\bdostum\b/gi
+  ];
+
+  let sanitized = answer;
+  for (const term of intimateTerms) {
+    sanitized = sanitized.replace(term, "");
+  }
+
+  // Clean up any double spaces created by removals
+  sanitized = sanitized.replace(/\s+/g, " ").trim();
+
+  return sanitized;
+}
+
+// ---------------------------------------------------------
 // LANGUAGE DETECTION
 // ---------------------------------------------------------
 
@@ -601,11 +638,15 @@ ${context
       temperature: 0.2
     });
 
+    // Sanitize the answer before returning
+    const rawAnswer = completion.choices?.[0]?.message?.content || "";
+    const sanitizedAnswer = sanitizeAnswer(rawAnswer);
+
     // Filter out zero-score chunks from metadata
     const usedChunks = relevant.filter((r) => r.score > 0);
 
     res.json({
-      answer: completion.choices?.[0]?.message?.content || "",
+      answer: sanitizedAnswer,
       language: lang,
       used_chunks: usedChunks.map((r) => ({ source: r.source, score: r.score }))
     });
