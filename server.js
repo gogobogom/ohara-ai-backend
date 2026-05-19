@@ -601,10 +601,13 @@ ${context
       temperature: 0.2
     });
 
+    // Filter out zero-score chunks from metadata
+    const usedChunks = relevant.filter((r) => r.score > 0);
+
     res.json({
       answer: completion.choices?.[0]?.message?.content || "",
       language: lang,
-      used_chunks: relevant.map((r) => ({ source: r.source, score: r.score }))
+      used_chunks: usedChunks.map((r) => ({ source: r.source, score: r.score }))
     });
   } catch (err) {
     console.error(err);
